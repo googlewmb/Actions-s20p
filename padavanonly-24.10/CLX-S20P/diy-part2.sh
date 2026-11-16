@@ -1,240 +1,189 @@
 #!/bin/bash
+# ============================================================
+# DIY2 - 第三方软件源与依赖处理
 #
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+# 软件包优先级：
+# 1. package/myapp：独立第三方源码，最高优先级
+# 2. DIY1 添加的第三方集合源
+# 3. 官方 feeds
 #
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# File name: diy-part2.sh
-# Description: OpenWrt DIY script part 2 (After ./scripts/feeds update -a, Before ./scripts/feeds install -a)
-#
-#!/bin/bash
-#
-# 第三方插件 / 依赖 / 来源优先级处理
-#
-# 常规来源优先级：
-#   1. package/myapp 独立第三方源码
-#   2. DIY1 添加的第三方集合源
-#   3. 官方 feeds
-#
-# dae / daed 特殊指定：
-#   1. kenzok8/small
-#   2. 不允许其他 feeds 覆盖
-#
-# rtp2httpd 特殊指定：
-#   1. stackia 官方 rtp2httpd Feed
-#   2. 不允许其他 feeds 覆盖
-#
-# 其他配置保持原样
-#
+# 特殊锁定：
+# - dae / daed：仅使用 feeds/small
+# - rtp2httpd：仅使用 feeds/rtp2httpd
+# - 特殊锁定包不允许其他 feeds 覆盖
+# ============================================================
 
 set -e
 
-echo "DIY2 - H68K + iStoreOS 24.10"
-echo "第三方插件 / 依赖 / 来源优先"
+# ============================================================
+# 1. 工作目录检查
+# ============================================================
 
-###############################################################################
-# 0. 基础目录
-###############################################################################
+TOPDIR="${GITHUB_WORKSPACE:-$(pwd)}"
 
-[ -d "$TOPDIR" ] || TOPDIR="$(pwd)"
+if [ ! -d "$TOPDIR/package" ] || [ ! -d "$TOPDIR/feeds" ]; then
+    echo "错误：未找到 OpenWrt 源码目录！"
+    exit 1
+fi
+
 cd "$TOPDIR"
 
-echo "TOPDIR: $TOPDIR"
+echo "=========================================="
+echo "开始执行 DIY2"
+echo "源码目录：$TOPDIR"
+echo "=========================================="
 
-###############################################################################
-# 1. 核心依赖与第三方源码拉取
-###############################################################################
 
-echo
-echo "========================================"
-echo "拉取/更新 核心依赖与 PassWall 组件"
-echo "========================================"
+# ============================================================
+# 2. PassWall 源码替换
+# ============================================================
 
-# 1.2 移除官方旧库并拉取 PassWall
-rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,v2ray-plugin,xray-plugin,geoview,shadow-tls}
+echo "=========================================="
+echo "替换 PassWall 源码"
+echo "=========================================="
+
+rm -rf package/network/utils/redsocks2
+rm -rf package/network/utils/tcping
+rm -rf package/network/utils/microsocks
 rm -rf feeds/luci/applications/luci-app-passwall
+rm -rf package/passwall-packages
+rm -rf package/passwall-luci
 
-rm -rf package/passwall-packages package/passwall-luci
-
-git clone --depth 1 https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
-git clone --depth 1 https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci
+git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
+git clone https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci
 
 
-echo "==== [diy-part2] 修复 rust download-ci-llvm 404 ===="
-RUST_MK="feeds/packages/lang/rust/Makefile"
-if [ -f "$RUST_MK" ]; then
-  sed -i 's/--set=llvm\.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' "$RUST_MK"
-  if grep -q 'download-ci-llvm=false' "$RUST_MK"; then
-    echo "    已设置 llvm.download-ci-llvm=false"
-  else
-    echo "    [警告] 未匹配到 download-ci-llvm=true，可能上游已修改或路径变化"
-    grep -n 'download-ci-llvm' "$RUST_MK" || true
-  fi
-else
-  echo "    [警告] 未找到 $RUST_MK，跳过"
+# ============================================================
+# 3. Rust 编译配置修复
+# ============================================================
+
+echo "=========================================="
+echo "修复 Rust 编译配置"
+echo "=========================================="
+
+RUST_MAKEFILE="feeds/packages/lang/rust/Makefile"
+
+if [ -f "$RUST_MAKEFILE" ]; then
+    sed -i 's/download-ci-llvm=true/download-ci-llvm=false/g' "$RUST_MAKEFILE"
 fi
 
 
+# ============================================================
+# 4. Golang 源码更新（kenzok8）
+# ============================================================
 
+echo "=========================================="
+echo "更新 Golang 源码"
+echo "=========================================="
 
-
-
-
-
-
-# 拉取 kenzok8 Go 1.27
 rm -rf feeds/packages/lang/golang
-git clone https://github.com/kenzok8/golang -b 1.27 feeds/packages/lang/golang
 
-# 1.3 刷新并注册新拉取的包索引
-echo "更新并安装新依赖索引..."
+git clone -b 1.27 https://github.com/kenzok8/golang feeds/packages/lang/golang
 
-# 更新 DIY1 添加的 stackia 官方 rtp2httpd Feed
+
+# ============================================================
+# 5. 更新并安装 feeds
+# ============================================================
+
+echo "=========================================="
+echo "更新并安装 feeds"
+echo "=========================================="
+
+./scripts/feeds update rtp2http2 2>/dev/null || true
 ./scripts/feeds update rtp2httpd
 
-# 保留原有依赖安装逻辑
 ./scripts/feeds install -p packages golang || true
 ./scripts/feeds install -f microsocks || true
 ./scripts/feeds install -a
 
-###############################################################################
-# 1.4 rtp2httpd 强制使用 stackia 官方 Feed
-#
-# 指定来源：
-#   feeds/rtp2httpd/openwrt-support/rtp2httpd
-#   feeds/rtp2httpd/openwrt-support/luci-app-rtp2httpd
-#
-# 处理方式：
-#   1. 检查 stackia 官方 Feed 源码
-#   2. 删除其他 feeds 中的同名安装入口
-#   3. 只从 stackia 官方 Feed 安装
-#   4. 验证实际软链接目标
-#   5. 检查其他 feeds 是否存在重复入口
-#
-# 不允许其他 feeds 覆盖。
-###############################################################################
 
-echo
-echo "========================================"
-echo "锁定 rtp2httpd 来源：stackia 官方 Feed"
-echo "========================================"
+# ============================================================
+# 6. rtp2httpd 特殊来源锁定
+#
+# 唯一来源：
+# feeds/rtp2httpd
+# ============================================================
+
+echo "=========================================="
+echo "锁定 rtp2httpd 来源"
+echo "=========================================="
 
 RTP2HTTPD_PACKAGES="
 rtp2httpd
 luci-app-rtp2httpd
 "
 
-# 第一步：确认 stackia 官方 Feed 已更新
-if [ ! -d feeds/rtp2httpd ]; then
-    echo "ERROR: stackia 官方 rtp2httpd Feed 不存在"
-    exit 1
-fi
-
-# 第二步：确认官方软件包源码存在
 for pkg in $RTP2HTTPD_PACKAGES; do
 
-    SOURCE="feeds/rtp2httpd/openwrt-support/${pkg}"
+    SRC="feeds/rtp2httpd/openwrt-support/${pkg}/Makefile"
 
-    if [ ! -f "${SOURCE}/Makefile" ]; then
-        echo "ERROR: stackia 官方 Feed 缺少 ${pkg}"
-        echo "检查路径: ${SOURCE}/Makefile"
+    if [ ! -f "$SRC" ]; then
+        echo "错误：rtp2httpd 源码不存在：$SRC"
         exit 1
     fi
 
-    echo "确认官方源码存在: ${SOURCE}"
-
-done
-
-# 第三步：删除其他 feeds 中的同名安装入口
-#
-# 注意：
-# 这里只删除 package/feeds 下的安装软链接，
-# 不删除 feeds 中的原始源码。
-#
-for pkg in $RTP2HTTPD_PACKAGES; do
-
+    # 清理其他 feeds 中的同名安装入口
     for entry in package/feeds/*/"$pkg"; do
-
         [ -e "$entry" ] || [ -L "$entry" ] || continue
 
-        feed="${entry#package/feeds/}"
-        feed="${feed%%/*}"
-
-        [ "$feed" = "rtp2httpd" ] && continue
-
-        echo "删除其他来源安装入口: ${feed}/${pkg}"
-
-        rm -rf "$entry"
-
+        case "$entry" in
+            package/feeds/rtp2httpd/*)
+                ;;
+            *)
+                rm -f "$entry"
+                ;;
+        esac
     done
 
 done
 
-# 第四步：只从 stackia 官方 Feed 安装
-./scripts/feeds install -p rtp2httpd \
-    rtp2httpd \
-    luci-app-rtp2httpd
+./scripts/feeds install -p rtp2httpd rtp2httpd luci-app-rtp2httpd
 
-# 第五步：验证官方安装入口
+# 检查安装入口是否指向指定源码
 for pkg in $RTP2HTTPD_PACKAGES; do
 
-    STACKIA_ENTRY="package/feeds/rtp2httpd/${pkg}"
-    STACKIA_SOURCE="feeds/rtp2httpd/openwrt-support/${pkg}"
+    LINK="package/feeds/rtp2httpd/${pkg}"
+    SRC="feeds/rtp2httpd/openwrt-support/${pkg}"
 
-    if [ ! -f "${STACKIA_ENTRY}/Makefile" ]; then
-        echo "ERROR: ${pkg} 官方安装入口不存在"
+    if [ ! -L "$LINK" ]; then
+        echo "错误：rtp2httpd 安装入口不存在：$LINK"
         exit 1
     fi
 
-    ENTRY_REAL="$(readlink -f "$STACKIA_ENTRY" 2>/dev/null || true)"
-    SOURCE_REAL="$(readlink -f "$STACKIA_SOURCE" 2>/dev/null || true)"
+    LINK_REAL="$(readlink -f "$LINK")"
+    SRC_REAL="$(readlink -f "$SRC")"
 
-    if [ -z "$ENTRY_REAL" ] || [ "$ENTRY_REAL" != "$SOURCE_REAL" ]; then
-        echo "ERROR: ${pkg} 实际来源不是 stackia 官方 Feed"
-        echo "安装入口: ${ENTRY_REAL}"
-        echo "官方源码: ${SOURCE_REAL}"
+    if [ "$LINK_REAL" != "$SRC_REAL" ]; then
+        echo "错误：rtp2httpd 来源不正确：$pkg"
         exit 1
     fi
 
-    echo
-    echo "✓ ${pkg}"
-    echo "  指定来源: stackia/rtp2httpd"
-    echo "  实际路径: ${ENTRY_REAL}"
-
-done
-
-# 第六步：检查其他 feeds，不允许存在重复安装入口
-for pkg in $RTP2HTTPD_PACKAGES; do
-
+    # 检查是否存在其他 feed 的同名入口
     for entry in package/feeds/*/"$pkg"; do
-
         [ -e "$entry" ] || [ -L "$entry" ] || continue
 
-        feed="${entry#package/feeds/}"
-        feed="${feed%%/*}"
-
-        [ "$feed" = "rtp2httpd" ] && continue
-
-        echo "ERROR: ${pkg} 发现其他 Feed 重复入口：${feed}"
-        exit 1
-
+        case "$entry" in
+            package/feeds/rtp2httpd/*)
+                ;;
+            *)
+                echo "错误：发现其他 feed 的 rtp2httpd 同名入口：$entry"
+                exit 1
+                ;;
+        esac
     done
 
 done
 
-echo
-echo "rtp2httpd stackia 官方来源锁定完成"
+echo "rtp2httpd 来源锁定完成"
 
-###############################################################################
-# 2. 第三方依赖预处理
-###############################################################################
 
-echo
-echo "========================================"
+# ============================================================
+# 7. 第三方依赖预处理
+# ============================================================
+
+echo "=========================================="
 echo "第三方依赖预处理"
-echo "========================================"
+echo "=========================================="
 
 REMOVE_OFFICIAL_DEPS=""
 
@@ -255,506 +204,350 @@ kenzo
 small
 "
 
-package_entry_exists()
-{
-    local feed="$1"
-    local pkg="$2"
-    local entry="package/feeds/${feed}/${pkg}"
+# 检查软件包安装入口
+package_entry_exists() {
+    local pkg="$1"
 
-    [ -e "$entry" ] || [ -L "$entry" ]
+    for entry in package/feeds/*/"$pkg"; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        return 0
+    done
+
+    return 1
 }
 
-remove_package_entry()
-{
-    local feed="$1"
-    local pkg="$2"
+# 删除指定软件包安装入口
+remove_package_entry() {
+    local pkg="$1"
+    local feed="$2"
     local entry="package/feeds/${feed}/${pkg}"
 
     if [ -e "$entry" ] || [ -L "$entry" ]; then
-        echo "删除安装入口: ${feed}/${pkg}"
         rm -f "$entry"
     fi
 }
 
-package_makefile()
-{
+# 获取软件包 Makefile
+package_makefile() {
     local feed="$1"
     local pkg="$2"
-    local makefile="package/feeds/${feed}/${pkg}/Makefile"
 
-    if [ -f "$makefile" ]; then
-        readlink -f "$makefile" 2>/dev/null || true
+    if [ -f "feeds/${feed}/${pkg}/Makefile" ]; then
+        echo "feeds/${feed}/${pkg}/Makefile"
+        return 0
     fi
+
+    if [ -f "feeds/${feed}/${pkg}/Makefile" ]; then
+        echo "feeds/${feed}/${pkg}/Makefile"
+        return 0
+    fi
+
+    return 1
 }
 
-is_enabled()
-{
+# 检查配置是否启用
+is_enabled() {
     local pkg="$1"
 
-    grep -Eq \
-        "^CONFIG_PACKAGE_${pkg}=(y|m)" \
-        .config 2>/dev/null
+    grep -q "^CONFIG_PACKAGE_${pkg}=y" .config 2>/dev/null ||
+    grep -q "^CONFIG_PACKAGE_${pkg}=m" .config 2>/dev/null
 }
 
-###############################################################################
-# 2.1 获取包版本函数
-#
-# 修复原脚本函数定义晚于首次调用的问题
-###############################################################################
-
-get_package_version()
-{
+# 获取软件包版本
+get_package_version() {
     local makefile="$1"
-    local version=""
 
-    [ -f "$makefile" ] || {
-        echo "unknown"
+    if [ ! -f "$makefile" ]; then
+        echo "未知"
         return
-    }
-
-    version="$(
-        sed -nE \
-            's/^[[:space:]]*PKG_VERSION[[:space:]]*:?=[[:space:]]*(.*)$/\1/p' \
-            "$makefile" |
-        head -n 1
-    )"
-
-    if [ -z "$version" ]; then
-        version="$(
-            sed -nE \
-                's/^[[:space:]]*PKG_RELEASE[[:space:]]*:?=[[:space:]]*(.*)$/release-\1/p' \
-                "$makefile" |
-            head -n 1
-        )"
     fi
 
-    [ -n "$version" ] || version="unknown"
+    local version
 
-    echo "$version"
+    version="$(grep -m1 '^PKG_VERSION:=' "$makefile" | cut -d= -f2-)"
+
+    if [ -z "$version" ]; then
+        version="$(grep -m1 '^PKG_RELEASE:=' "$makefile" | cut -d= -f2-)"
+    fi
+
+    echo "${version:-未知}"
 }
 
-###############################################################################
-# 2.2 明确要求移除的官方依赖入口
-###############################################################################
+
+# ============================================================
+# 8. 清理指定官方依赖包
+# ============================================================
+
+echo "=========================================="
+echo "清理官方依赖包"
+echo "=========================================="
 
 for pkg in $REMOVE_OFFICIAL_DEPS; do
 
-    [ -n "$pkg" ] || continue
-
-    echo "明确要求：移除官方依赖入口 -> $pkg"
-
-    for official_feed in $OFFICIAL_FEEDS; do
-        remove_package_entry "$official_feed" "$pkg"
+    for feed in $OFFICIAL_FEEDS; do
+        remove_package_entry "$pkg" "$feed"
     done
 
 done
 
-###############################################################################
-# 2.3 dae / daed 核心强制使用 kenzok8/small
-#
-# 指定来源：
-#   dae  -> feeds/small/dae
-#   daed -> feeds/small/daed
-#
-# 处理方式：
-#   1. 检查 small 源码
-#   2. 删除所有 feeds 中已有的同名安装入口
-#   3. 只建立 small 来源软链接
-#   4. 验证实际链接目标
-#   5. 检查 package/myapp 是否存在同名核心包
-#
-# 不允许其他 feeds 覆盖。
-# luci-app-daede 不在本段强制修改范围内。
-###############################################################################
 
-echo
-echo "========================================"
-echo "锁定 dae / daed 核心来源：kenzok8/small"
-echo "========================================"
+# ============================================================
+# 9. dae / daed 特殊来源锁定
+#
+# 唯一来源：
+# feeds/small
+#
+# 注意：
+# luci-app-daede 不属于本段锁定范围
+# ============================================================
+
+echo "=========================================="
+echo "锁定 dae / daed 来源"
+echo "=========================================="
 
 DAE_CORE_PACKAGES="
 dae
 daed
 "
 
-###############################################################################
-# 第一步：确认 small feed 源码存在
-###############################################################################
-
 for pkg in $DAE_CORE_PACKAGES; do
 
-    SMALL_SOURCE="feeds/small/${pkg}"
+    SRC="feeds/small/${pkg}/Makefile"
 
-    if [ ! -f "${SMALL_SOURCE}/Makefile" ]; then
-        echo "ERROR: small feed 中不存在 ${pkg}"
-        echo "检查路径: ${SMALL_SOURCE}/Makefile"
+    if [ ! -f "$SRC" ]; then
+        echo "错误：未找到 ${pkg} 指定源码：$SRC"
         exit 1
     fi
 
-    echo "确认 small 源码存在: ${SMALL_SOURCE}"
+    # 检查 package/myapp 是否存在同名核心软件包定义
+    if grep -R -nE "define Package/${pkg}([[:space:]]|$)" package/myapp 2>/dev/null; then
+        echo "错误：package/myapp 中发现 ${pkg} 同名定义"
+        exit 1
+    fi
 
-done
-
-###############################################################################
-# 第二步：检查 package/myapp 是否存在同名核心包
-###############################################################################
-
-if [ -d package/myapp ]; then
-
-    for pkg in $DAE_CORE_PACKAGES; do
-
-        if grep -rqE \
-            "^[[:space:]]*define[[:space:]]+Package/${pkg}([[:space:]]|$)" \
-            --include=Makefile \
-            package/myapp 2>/dev/null; then
-
-            echo "ERROR: package/myapp 中发现同名核心包 ${pkg}"
-            echo "small 和 package/myapp 存在重复定义风险"
-            echo "请在 DIY1 中取消添加该核心包"
-            exit 1
-
-        fi
-
+    # 清理所有 feeds 中的同名安装入口
+    for entry in package/feeds/*/"$pkg"; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        rm -f "$entry"
     done
 
-fi
+    mkdir -p package/feeds/small
 
-###############################################################################
-# 第三步：删除所有 feeds 中已有的 dae / daed 安装入口
-###############################################################################
+    # 建立 small 专属安装入口
+    ln -s "../../../feeds/small/${pkg}" "package/feeds/small/${pkg}"
 
-echo
-echo "清理其他 feeds 中的 dae / daed 安装入口..."
+    LINK="package/feeds/small/${pkg}"
 
-for pkg in $DAE_CORE_PACKAGES; do
+    if [ ! -L "$LINK" ]; then
+        echo "错误：${pkg} 安装入口创建失败"
+        exit 1
+    fi
 
+    LINK_REAL="$(readlink -f "$LINK")"
+    SRC_REAL="$(readlink -f "feeds/small/${pkg}")"
+
+    if [ "$LINK_REAL" != "$SRC_REAL" ]; then
+        echo "错误：${pkg} 来源不正确"
+        exit 1
+    fi
+
+    VERSION="$(get_package_version "$SRC")"
+
+    echo "${pkg} 来源：feeds/small"
+    echo "${pkg} 版本：${VERSION}"
+
+    # 检查其他 feed 是否存在同名入口
     for entry in package/feeds/*/"$pkg"; do
-
         [ -e "$entry" ] || [ -L "$entry" ] || continue
 
-        feed="${entry#package/feeds/}"
-        feed="${feed%%/*}"
-
-        echo "删除旧安装入口: ${feed}/${pkg}"
-
-        rm -rf "$entry"
-
-    done
-
-done
-
-###############################################################################
-# 第四步：只建立 small 来源软链接
-###############################################################################
-
-mkdir -p package/feeds/small
-
-for pkg in $DAE_CORE_PACKAGES; do
-
-    SMALL_SOURCE="feeds/small/${pkg}"
-    SMALL_ENTRY="package/feeds/small/${pkg}"
-
-    if [ -e "$SMALL_ENTRY" ] || [ -L "$SMALL_ENTRY" ]; then
-        rm -rf "$SMALL_ENTRY"
-    fi
-
-    ln -s "../../../feeds/small/${pkg}" "$SMALL_ENTRY"
-
-    if [ ! -f "${SMALL_ENTRY}/Makefile" ]; then
-        echo "ERROR: ${pkg} small 软链接创建失败"
-        exit 1
-    fi
-
-    SMALL_REAL="$(readlink -f "$SMALL_ENTRY" 2>/dev/null || true)"
-    FEED_REAL="$(readlink -f "$SMALL_SOURCE" 2>/dev/null || true)"
-
-    if [ -z "$SMALL_REAL" ] || [ "$SMALL_REAL" != "$FEED_REAL" ]; then
-        echo "ERROR: ${pkg} 实际链接目标不是 feeds/small"
-        echo "安装入口: ${SMALL_REAL}"
-        echo "源码目录: ${FEED_REAL}"
-        exit 1
-    fi
-
-    SMALL_VERSION="$(get_package_version "${SMALL_ENTRY}/Makefile")"
-
-    echo
-    echo "✓ ${pkg}"
-    echo "  指定来源: small/${pkg}"
-    echo "  实际路径: ${SMALL_REAL}"
-    echo "  软件包版本: ${SMALL_VERSION}"
-
-done
-
-###############################################################################
-# 第五步：检查所有其他 feeds，不允许重复入口
-###############################################################################
-
-for pkg in $DAE_CORE_PACKAGES; do
-
-    for entry in package/feeds/*/"$pkg"; do
-
-        [ -e "$entry" ] || [ -L "$entry" ] || continue
-
-        feed="${entry#package/feeds/}"
-        feed="${feed%%/*}"
-
-        [ "$feed" = "small" ] && continue
-
-        echo "ERROR: 发现其他 feed 重复入口: ${feed}/${pkg}"
-        exit 1
-
-    done
-
-done
-
-echo
-echo "dae / daed 核心来源锁定完成"
-
-###############################################################################
-# 3. H68K DTS 处理
-###############################################################################
-
-# echo
-# echo "========================================"
-# echo "H68K DTS"
-# echo "========================================"
-
-# DTS_SOURCE="$GITHUB_WORKSPACE/test-istore/diy/H68K-DTS Linux6.1-6.6.dts"
-
-# if [ -f "$DTS_SOURCE" ]; then
-#
-#     mkdir -p target/linux/rockchip/dts/rk3568
-#     mkdir -p target/linux/rockchip/files/arch/arm64/boot/dts/rockchip
-#
-#     cp -f "$DTS_SOURCE" \
-#         target/linux/rockchip/dts/rk3568/rk3568-opc-h68k.dts
-#
-#     cp -f "$DTS_SOURCE" \
-#         target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3568-opc-h68k.dts
-#
-#     cp -f "$DTS_SOURCE" \
-#         target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3568-hinlink-opc-h68k.dts
-#
-#     echo "H68K DTS 已复制"
-#
-# else
-#
-#     echo "WARNING: 未找到 H68K DTS:"
-#     echo "$DTS_SOURCE"
-#
-# fi
-
-###############################################################################
-# 4. 扫描 package/myapp 真正的 Package
-###############################################################################
-
-echo
-echo "========================================"
-echo "扫描 DIY1 独立第三方插件"
-echo "========================================"
-
-MYAPP_PACKAGES=""
-
-if [ -d package/myapp ]; then
-
-    while IFS= read -r pkg; do
-
-        [ -n "$pkg" ] || continue
-
-        case "$pkg" in
-            '\( ('*|*' \))'|*'/'*)
-                continue
+        case "$entry" in
+            package/feeds/small/*)
+                ;;
+            *)
+                echo "错误：发现 ${pkg} 其他来源：$entry"
+                exit 1
                 ;;
         esac
+    done
 
-        MYAPP_PACKAGES="$MYAPP_PACKAGES
-$pkg"
+done
 
-        echo "✓ $pkg"
+echo "dae / daed 来源锁定完成"
 
-    done < <(
-        find package/myapp \
-            -type f \
-            -name Makefile \
-            -print0 2>/dev/null |
-        xargs -0 -r sed -nE \
-            's/^[[:space:]]*define[[:space:]]+Package\/([A-Za-z0-9_.+@:-]+)[[:space:]]*$/\1/p' |
-        sort -u || true
-    )
 
-else
+# ============================================================
+# 10. H68K DTS 修改
+# ============================================================
 
-    echo "WARNING: package/myapp 不存在"
+: '
+H68K DTS 修改内容
 
+原始文件：
+$GITHUB_WORKSPACE/test-istore/diy/H68K-DTS Linux6.1-6.6.dts
+
+此处保留原始注释代码，不执行。
+'
+
+
+# ============================================================
+# 11. 扫描 package/myapp 中的独立第三方软件包
+# ============================================================
+
+echo "=========================================="
+echo "扫描 package/myapp 软件包"
+echo "=========================================="
+
+MYAPP_PACKAGES="$(
+    find package/myapp -name Makefile -type f -print0 2>/dev/null |
+    xargs -0 -r grep -hE '^define Package/' |
+    sed -E 's/^define Package\/([^[:space:]\\]+).*/\1/' |
+    sort -u
+)"
+
+# 排除不符合软件包名称规则的条目
+MYAPP_PACKAGES="$(
+    printf '%s\n' "$MYAPP_PACKAGES" |
+    grep -vE '\( ('*'|*'/'*' 2>/dev/null || true
+)"
+
+echo "package/myapp 软件包列表："
+printf '%s\n' "$MYAPP_PACKAGES"
+
+
+# ============================================================
+# 12. 读取 .config 中启用的软件包
+# ============================================================
+
+echo "=========================================="
+echo "读取 .config 软件包"
+echo "=========================================="
+
+if [ ! -f .config ]; then
+    echo "错误：未找到 .config"
+    exit 1
 fi
 
-###############################################################################
-# 5. 收集当前 .config 中实际启用的 Package
-###############################################################################
+CONFIG_PACKAGES="$(
+    sed -nE \
+        's/^CONFIG_PACKAGE_([^=]+)=(y|m)$/\1/p' \
+        .config |
+    sort -u
+)"
 
-echo
-echo "========================================"
-echo "读取当前 .config"
-echo "========================================"
+echo "已启用软件包数量：$(printf '%s\n' "$CONFIG_PACKAGES" | grep -c . || true)"
 
-CONFIG_PACKAGES=""
 
-if [ -f .config ]; then
+# ============================================================
+# 13. package/myapp 独立第三方源码优先
+#
+# 优先级最高：
+# package/myapp > 所有 feeds
+# ============================================================
 
-    CONFIG_PACKAGES="$(
-        sed -nE \
-            's/^CONFIG_PACKAGE_([A-Za-z0-9_.+@:-]+)=(y|m)$/\1/p' \
-            .config |
-        sort -u
-    )"
-
-fi
-
-echo "当前启用的第三方/官方 Package 数量：$(printf '%s\n' "$CONFIG_PACKAGES" | sed '/^$/d' | wc -l)"
-
-###############################################################################
-# 6. 独立第三方插件优先
-###############################################################################
-
-echo
-echo "========================================"
-echo "独立第三方插件优先"
-echo "========================================"
+echo "=========================================="
+echo "处理 package/myapp 独立第三方源码"
+echo "=========================================="
 
 for pkg in $MYAPP_PACKAGES; do
 
-    [ -n "$pkg" ] || continue
+    MYAPP_MAKEFILE="$(
+        find "package/myapp" -path "*/${pkg}/Makefile" -type f -print -quit 2>/dev/null
+    )"
 
-    echo
-    echo "检查独立第三方插件: $pkg"
-
-    MYAPP_MAKEFILE=""
-
-    while IFS= read -r -d '' mf; do
-
-        [ -f "$mf" ] || continue
-
-        if grep -q \
-            "^[[:space:]]*define[[:space:]]\+Package/${pkg}[[:space:]]*$" \
-            "$mf" 2>/dev/null; then
-
-            MYAPP_MAKEFILE="$mf"
-            break
-
-        fi
-
-    done < <(
-        find package/myapp \
-            -type f \
-            -name Makefile \
-            -print0 2>/dev/null || true
-    )
-
-    if [ -z "$MYAPP_MAKEFILE" ] &&
-       [ -f "package/myapp/${pkg}/Makefile" ]; then
-
-        MYAPP_MAKEFILE="package/myapp/${pkg}/Makefile"
-
+    if [ -z "$MYAPP_MAKEFILE" ]; then
+        continue
     fi
 
-    if [ -n "$MYAPP_MAKEFILE" ]; then
-        MYAPP_VERSION="$(get_package_version "$MYAPP_MAKEFILE")"
-        echo "package/myapp 版本: $MYAPP_VERSION"
-    else
-        MYAPP_VERSION="unknown"
-    fi
+    VERSION="$(get_package_version "$MYAPP_MAKEFILE")"
 
-    for feed in $THIRD_PARTY_FEEDS $OFFICIAL_FEEDS; do
+    echo "独立源码：${pkg}"
+    echo "源码路径：${MYAPP_MAKEFILE}"
+    echo "软件版本：${VERSION}"
 
-        if package_entry_exists "$feed" "$pkg"; then
+    # 删除第三方集合源中的同名安装入口
+    for feed in $THIRD_PARTY_FEEDS; do
+        remove_package_entry "$pkg" "$feed"
+    done
 
-            MAKEFILE="$(package_makefile "$feed" "$pkg")"
-            VERSION="$(get_package_version "$MAKEFILE")"
-
-            echo "发现重复来源:"
-            echo "  $feed/$pkg"
-            echo "  版本: $VERSION"
-            echo "选择: package/myapp"
-            echo "原因: 独立第三方源码优先"
-
-            remove_package_entry "$feed" "$pkg"
-
-        fi
-
+    # 删除官方 feeds 中的同名安装入口
+    for feed in $OFFICIAL_FEEDS; do
+        remove_package_entry "$pkg" "$feed"
     done
 
 done
 
-###############################################################################
-# 7. 第三方集合源优先 (THIRD_PARTY_FEEDS > OFFICIAL_FEEDS)
-###############################################################################
 
-echo
-echo "========================================"
-echo "第三方集合源优先"
-echo "========================================"
+# ============================================================
+# 14. 第三方集合源优先于官方 feeds
+#
+# 优先级：
+# package/myapp
+#     >
+# nas / nas_luci / jjm2473_apps / kenzo / small
+#     >
+# 官方 feeds
+#
+# dae / daed 已单独锁定，不参与本段处理
+# ============================================================
+
+echo "=========================================="
+echo "处理第三方集合源优先级"
+echo "=========================================="
 
 for pkg in $CONFIG_PACKAGES; do
 
-    [ -n "$pkg" ] || continue
-
-    # dae / daed 使用 small 专属来源，不参与普通优先级处理
+    # dae / daed 使用专门的来源锁定逻辑
     case "$pkg" in
         dae|daed)
-            echo "跳过普通来源处理: $pkg（已锁定 small）"
             continue
             ;;
     esac
 
-    case "
-$MYAPP_PACKAGES
-" in
-        *"
-$pkg
-"*)
-            continue
-            ;;
-    esac
+    # package/myapp 已经具有最高优先级
+    if printf '%s\n' "$MYAPP_PACKAGES" | grep -Fxq "$pkg"; then
+        continue
+    fi
 
-    THIRD_SOURCE=""
+    THIRD_PARTY_SOURCE=""
 
-    for third_feed in $THIRD_PARTY_FEEDS; do
+    # 按照第三方集合源顺序寻找第一个有效来源
+    for feed in $THIRD_PARTY_FEEDS; do
 
-        if package_entry_exists "$third_feed" "$pkg"; then
-            THIRD_SOURCE="$third_feed"
+        MAKEFILE="feeds/${feed}/${pkg}/Makefile"
+
+        if [ -f "$MAKEFILE" ]; then
+            THIRD_PARTY_SOURCE="$feed"
             break
         fi
 
     done
 
-    [ -n "$THIRD_SOURCE" ] || continue
+    # 没有第三方来源则保留官方 feeds
+    if [ -z "$THIRD_PARTY_SOURCE" ]; then
+        continue
+    fi
 
-    THIRD_MAKEFILE="$(package_makefile "$THIRD_SOURCE" "$pkg")"
-    THIRD_VERSION="$(get_package_version "$THIRD_MAKEFILE")"
+    THIRD_VERSION="$(
+        get_package_version "feeds/${THIRD_PARTY_SOURCE}/${pkg}/Makefile"
+    )"
 
-    echo
-    echo "发现第三方重复包: $pkg"
-    echo "第三方来源: ${THIRD_SOURCE}/${pkg}"
-    echo "第三方版本: $THIRD_VERSION"
+    echo "第三方优先：${pkg}"
+    echo "优先来源：${THIRD_PARTY_SOURCE}"
+    echo "优先版本：${THIRD_VERSION}"
 
-    for official_feed in $OFFICIAL_FEEDS; do
+    # 删除所有官方 feeds 中的同名安装入口
+    for feed in $OFFICIAL_FEEDS; do
 
-        if package_entry_exists "$official_feed" "$pkg"; then
+        OFFICIAL_MAKEFILE="feeds/${feed}/${pkg}/Makefile"
 
-            OFFICIAL_MAKEFILE="$(package_makefile "$official_feed" "$pkg")"
+        if [ -f "$OFFICIAL_MAKEFILE" ]; then
+
             OFFICIAL_VERSION="$(get_package_version "$OFFICIAL_MAKEFILE")"
 
-            echo "官方来源: ${official_feed}/${pkg}"
-            echo "官方版本: $OFFICIAL_VERSION"
+            echo "清理官方来源：${feed}/${pkg}"
+            echo "官方版本：${OFFICIAL_VERSION}"
 
-            if [ "$THIRD_VERSION" = "$OFFICIAL_VERSION" ]; then
-                echo "版本相同 -> 选择: 第三方 ${THIRD_SOURCE}/${pkg}"
-            else
-                echo "版本不同 -> 选择: 第三方 ${THIRD_SOURCE}/${pkg}"
-                echo "原因: 第三方来源优先，不按版本号自动选择"
-            fi
-
-            remove_package_entry "$official_feed" "$pkg"
+            remove_package_entry "$pkg" "$feed"
 
         fi
 
@@ -762,435 +555,528 @@ $pkg
 
 done
 
-###############################################################################
-# 8. SmartDNS Rust Makefile 修复
-###############################################################################
 
-echo
-echo "========================================"
+# ============================================================
+# 15. SmartDNS Rust Makefile 路径修复
+# ============================================================
+
+echo "=========================================="
 echo "修复 SmartDNS Rust Makefile"
-echo "========================================"
+echo "=========================================="
 
-if [ -f package/myapp/smartdns/package/openwrt/Makefile ]; then
+SMARTDNS_MAKEFILES="
+package/myapp/smartdns/package/openwrt/Makefile
+package/myapp/smartdns/Makefile
+"
 
-    sed -i \
-        's@include ../../lang/rust/rust-package.mk@include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk@g' \
-        package/myapp/smartdns/package/openwrt/Makefile
+for file in $SMARTDNS_MAKEFILES; do
 
-    echo "已修复: package/myapp/smartdns/package/openwrt/Makefile"
+    if [ -f "$file" ]; then
 
-fi
+        sed -i \
+            's|include ../../lang/rust/rust-package.mk|include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk|g' \
+            "$file"
 
-if [ -f package/myapp/smartdns/Makefile ]; then
+        echo "已修复：$file"
 
-    sed -i \
-        's@include ../../lang/rust/rust-package.mk@include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk@g' \
-        package/myapp/smartdns/Makefile
+    fi
 
-    echo "已修复: package/myapp/smartdns/Makefile"
+done
 
-fi
 
-###############################################################################
-# 9. 自动添加 LuCI 中文语言包
-###############################################################################
+# ============================================================
+# 16. 自动添加 LuCI 中文语言包
+# ============================================================
 
-echo
-echo "========================================"
-echo "添加 LuCI 中文语言包"
-echo "========================================"
+echo "=========================================="
+echo "自动添加 LuCI 中文语言包"
+echo "=========================================="
 
-if [ -f .config ]; then
+LUCI_APPS="$(
+    sed -nE \
+        's/^CONFIG_PACKAGE_(luci-app-[^=]+)=y$/\1/p' \
+        .config |
+    sort -u
+)"
 
-    for pkg in $(
-        grep '^CONFIG_PACKAGE_luci-app-.*=y' .config |
-        sed 's/^CONFIG_PACKAGE_//;s/=y//' |
-        sort -u
-    ); do
+for pkg in $LUCI_APPS; do
 
-        trans="luci-i18n-${pkg#luci-app-}"
+    trans="luci-i18n-${pkg#luci-app-}-zh-cn"
 
-        if grep -q \
-            "^CONFIG_PACKAGE_${trans}-zh-cn=y" \
-            .config 2>/dev/null; then
-            continue
-        fi
+    if grep -R -qE "Package.*${trans}" package feeds 2>/dev/null; then
 
-        if grep -rnq \
-            "Package.*${trans}-zh-cn" \
-            package feeds 2>/dev/null; then
+        if ! grep -q "^CONFIG_PACKAGE_${trans}=y" .config; then
 
-            echo "添加中文语言包: ${trans}-zh-cn"
+            echo "CONFIG_PACKAGE_${trans}=y" >> .config
 
-            echo \
-                "CONFIG_PACKAGE_${trans}-zh-cn=y" \
-                >> .config
+            echo "添加中文语言包：${trans}"
 
         fi
 
-    done
+    fi
 
-fi
+done
 
-###############################################################################
-# 10. conntrack 调优
-###############################################################################
 
-echo
-echo "========================================"
-echo "设置 conntrack"
-echo "========================================"
+# ============================================================
+# 17. Conntrack 连接数配置
+# ============================================================
 
-sed -i \
-    '/^[[:space:]]*net\.netfilter\.nf_conntrack_max[[:space:]]*=/d' \
-    package/base-files/files/etc/sysctl.conf
+echo "=========================================="
+echo "设置 Conntrack 连接数"
+echo "=========================================="
 
-echo \
-    'net.netfilter.nf_conntrack_max=655550' \
-    >> package/base-files/files/etc/sysctl.conf
+SYSCTL_FILE="package/base-files/files/etc/sysctl.conf"
 
-echo "nf_conntrack_max = 655550"
+mkdir -p "$(dirname "$SYSCTL_FILE")"
 
-###############################################################################
-# 11. Wi-Fi 首次启动自动开启
-###############################################################################
+touch "$SYSCTL_FILE"
 
-echo
-echo "========================================"
-echo "设置 Wi-Fi 首次启动自动开启"
-echo "========================================"
+sed -i '/net\.netfilter\.nf_conntrack_max/d' "$SYSCTL_FILE"
 
-mkdir -p files/etc/uci-defaults
+echo "net.netfilter.nf_conntrack_max=655550" >> "$SYSCTL_FILE"
 
-cat > files/etc/uci-defaults/zz-enable-wifi <<'EOF'
+
+# ============================================================
+# 18. Wi-Fi 首次启动自动启用
+# ============================================================
+
+echo "=========================================="
+echo "配置 Wi-Fi 首次启动脚本"
+echo "=========================================="
+
+WIFI_SCRIPT="files/etc/uci-defaults/zz-enable-wifi"
+
+mkdir -p "$(dirname "$WIFI_SCRIPT")"
+
+cat > "$WIFI_SCRIPT" <<'EOF'
 #!/bin/sh
 
-. /lib/functions.sh
-
-# 等待无线配置真正出现（最多约 30 秒）
+# 等待无线配置文件生成
 i=0
-while [ $i -lt 30 ]; do
-    [ -s /etc/config/wireless ] && break
+
+while [ ! -f /etc/config/wireless ] && [ "$i" -lt 30 ]; do
     sleep 1
     i=$((i + 1))
 done
 
-# 仍不存在则尝试生成
-[ -s /etc/config/wireless ] || wifi config 2>/dev/null || true
+# 如果无线配置不存在，尝试生成
+if [ ! -f /etc/config/wireless ]; then
+    wifi config
+fi
 
-[ -s /etc/config/wireless ] || exit 0
+[ -f /etc/config/wireless ] || exit 0
+
+. /lib/functions.sh
+
+# 启用无线设备
+enable_all() {
+    local section="$1"
+    uci set wireless."$section".disabled='0'
+}
 
 config_load wireless
 
-enable_all()
-{
-    local cfg="$1"
-    uci -q set "wireless.${cfg}.disabled=0"
-}
-
-# 同时处理 wifi-device 和 wifi-iface
 config_foreach enable_all wifi-device
 config_foreach enable_all wifi-iface
 
-uci -q commit wireless
+uci commit wireless
 
-# 拉起无线
-wifi up 2>/dev/null || wifi 2>/dev/null || true
+wifi up || wifi
 
 exit 0
 EOF
 
-chmod +x files/etc/uci-defaults/zz-enable-wifi
+chmod +x "$WIFI_SCRIPT"
 
-echo "Wi-Fi 首次启动自动开启已设置（带等待 + wifi up）"
 
-###############################################################################
-# 12. 最终来源检查
-###############################################################################
+# ============================================================
+# 19. 最终软件包来源检查
+# ============================================================
 
-echo
-echo "========================================"
-echo "最终第三方插件来源检查"
-echo "========================================"
+echo "=========================================="
+echo "最终软件包来源检查"
+echo "=========================================="
 
+# package/myapp 独立第三方软件包
 for pkg in $MYAPP_PACKAGES; do
 
-    [ -n "$pkg" ] || continue
+    MYAPP_MAKEFILE="$(
+        find "package/myapp" -path "*/${pkg}/Makefile" -type f -print -quit 2>/dev/null
+    )"
 
-    echo
-    echo "[$pkg]"
+    [ -n "$MYAPP_MAKEFILE" ] || continue
 
-    if [ -d "package/myapp" ]; then
+    VERSION="$(get_package_version "$MYAPP_MAKEFILE")"
 
-        FOUND_MYAPP=""
-
-        while IFS= read -r -d '' mf; do
-
-            [ -f "$mf" ] || continue
-
-            if grep -q \
-                "^[[:space:]]*define[[:space:]]\+Package/${pkg}[[:space:]]*$" \
-                "$mf" 2>/dev/null; then
-
-                FOUND_MYAPP="$mf"
-                break
-
-            fi
-
-        done < <(
-            find package/myapp \
-                -type f \
-                -name Makefile \
-                -print0 2>/dev/null || true
-        )
-
-        if [ -z "$FOUND_MYAPP" ] &&
-           [ -f "package/myapp/${pkg}/Makefile" ]; then
-
-            FOUND_MYAPP="package/myapp/${pkg}/Makefile"
-
-        fi
-
-        if [ -n "$FOUND_MYAPP" ]; then
-
-            echo "  package/myapp"
-            echo "  Makefile: $FOUND_MYAPP"
-            echo "  version: $(get_package_version "$FOUND_MYAPP")"
-
-        else
-
-            echo "  WARNING: 未找到对应的独立源码 Makefile"
-
-        fi
-
-    fi
+    echo "[MYAPP] ${pkg}"
+    echo "  路径：${MYAPP_MAKEFILE}"
+    echo "  版本：${VERSION}"
 
 done
 
-###############################################################################
-# 12.1 dae / daed 最终来源检查
-###############################################################################
 
-echo
-echo "========================================"
-echo "dae / daed 最终来源检查"
-echo "========================================"
+# dae / daed 最终来源检查
+for pkg in $DAE_CORE_PACKAGES; do
 
-for pkg in dae daed; do
+    LINK="package/feeds/small/${pkg}"
+    SRC="feeds/small/${pkg}"
 
-    SMALL_DIR="package/feeds/small/${pkg}"
-    SMALL_MAKEFILE="${SMALL_DIR}/Makefile"
-
-    if [ ! -f "$SMALL_MAKEFILE" ]; then
-        echo "ERROR: ${pkg} small 来源丢失"
+    if [ ! -L "$LINK" ]; then
+        echo "错误：${pkg} 安装入口不存在"
         exit 1
     fi
 
-    SMALL_REAL="$(readlink -f "$SMALL_DIR" 2>/dev/null || true)"
-    FEED_REAL="$(readlink -f "feeds/small/${pkg}" 2>/dev/null || true)"
-
-    if [ -z "$SMALL_REAL" ] || [ "$SMALL_REAL" != "$FEED_REAL" ]; then
-        echo "ERROR: ${pkg} 来源不是 small"
+    if [ "$(readlink -f "$LINK")" != "$(readlink -f "$SRC")" ]; then
+        echo "错误：${pkg} 最终来源不是 feeds/small"
         exit 1
     fi
 
-    echo "✓ ${pkg}"
-    echo "  来源: package/feeds/small/${pkg}"
-    echo "  版本: $(get_package_version "$SMALL_MAKEFILE")"
+    VERSION="$(get_package_version "${SRC}/Makefile")"
 
-    # 检查所有 feeds，不允许存在其他同名入口
+    echo "[DAE] ${pkg}"
+    echo "  来源：feeds/small"
+    echo "  版本：${VERSION}"
+
     for entry in package/feeds/*/"$pkg"; do
 
         [ -e "$entry" ] || [ -L "$entry" ] || continue
 
-        feed="${entry#package/feeds/}"
-        feed="${feed%%/*}"
-
-        [ "$feed" = "small" ] && continue
-
-        echo "ERROR: 发现其他 feed 重复入口: ${feed}/${pkg}"
-        exit 1
+        case "$entry" in
+            package/feeds/small/*)
+                ;;
+            *)
+                echo "错误：${pkg} 存在其他来源：${entry}"
+                exit 1
+                ;;
+        esac
 
     done
 
 done
 
-echo "dae / daed 最终来源验证通过"
 
-###############################################################################
-# 12.2 rtp2httpd 最终来源检查
-###############################################################################
+# rtp2httpd 最终来源检查
+for pkg in $RTP2HTTPD_PACKAGES; do
 
-echo
-echo "========================================"
-echo "rtp2httpd 最终来源检查"
-echo "========================================"
+    LINK="package/feeds/rtp2httpd/${pkg}"
+    SRC="feeds/rtp2httpd/openwrt-support/${pkg}"
 
-for pkg in rtp2httpd luci-app-rtp2httpd; do
-
-    STACKIA_DIR="package/feeds/rtp2httpd/${pkg}"
-    STACKIA_SOURCE="feeds/rtp2httpd/openwrt-support/${pkg}"
-
-    if [ ! -f "${STACKIA_DIR}/Makefile" ]; then
-        echo "ERROR: ${pkg} stackia 官方安装入口丢失"
+    if [ ! -L "$LINK" ]; then
+        echo "错误：${pkg} 安装入口不存在"
         exit 1
     fi
 
-    STACKIA_REAL="$(readlink -f "$STACKIA_DIR" 2>/dev/null || true)"
-    SOURCE_REAL="$(readlink -f "$STACKIA_SOURCE" 2>/dev/null || true)"
-
-    if [ -z "$STACKIA_REAL" ] || [ "$STACKIA_REAL" != "$SOURCE_REAL" ]; then
-        echo "ERROR: ${pkg} 实际来源不是 stackia 官方 Feed"
+    if [ "$(readlink -f "$LINK")" != "$(readlink -f "$SRC")" ]; then
+        echo "错误：${pkg} 最终来源不是 feeds/rtp2httpd"
         exit 1
     fi
 
-    echo "✓ ${pkg}"
-    echo "  来源: stackia 官方 Feed"
-    echo "  实际路径: ${STACKIA_REAL}"
+    echo "[RTP2HTTPD] ${pkg}"
+    echo "  来源：feeds/rtp2httpd"
 
-    # 检查其他 feeds，不允许存在同名安装入口
     for entry in package/feeds/*/"$pkg"; do
 
         [ -e "$entry" ] || [ -L "$entry" ] || continue
 
-        feed="${entry#package/feeds/}"
-        feed="${feed%%/*}"
-
-        [ "$feed" = "rtp2httpd" ] && continue
-
-        echo "ERROR: ${pkg} 发现其他 Feed 重复入口：${feed}"
-        exit 1
+        case "$entry" in
+            package/feeds/rtp2httpd/*)
+                ;;
+            *)
+                echo "错误：${pkg} 存在其他来源：${entry}"
+                exit 1
+                ;;
+        esac
 
     done
 
 done
 
-echo "rtp2httpd stackia 官方来源验证通过"
+echo "所有特殊软件包来源检查通过"
 
-###############################################################################
-# 13. IPQ60xx 内核大小修改 + SKB Recycler
-###############################################################################
 
-echo
-echo "========================================"
-echo "修改 IPQ60xx 内核大小 / 开启 SKB Recycler"
-echo "========================================"
+# ============================================================
+# 20. IPQ60xx 内核大小修改
+# ============================================================
 
-###############################################################################
-# 修改内核大小
-###############################################################################
+echo "=========================================="
+echo "修改 IPQ60xx 内核大小"
+echo "=========================================="
 
 set_kernel_size() {
 
-    # 修改 JDC AX1800 Pro 的内核大小为 12M
-    image_file='./target/linux/qualcommax/image/ipq60xx.mk'
+    local file="$1"
+    local old="$2"
+    local new="$3"
 
-    if [ ! -f "$image_file" ]; then
-        echo "WARNING: 未找到 $image_file"
-        return 0
+    if [ -f "$file" ]; then
+
+        sed -i "s/${old}/${new}/g" "$file"
+
+        echo "已修改：${file}"
+
     fi
 
-    sed -i "/^define Device\/emmc-common/,/^endef/ s/KERNEL_SIZE := 6144k/KERNEL_SIZE := 12288k/" "$image_file"
-
-    sed -i "/^define Device\/nand-common/,/^endef/ s/^endef/\tKERNEL_SIZE := 8192k\nendef/" "$image_file"
-
-    sed -i "/^define Device\/jdcloud_re-ss-01/,/^endef/ { /KERNEL_SIZE := 6144k/s//KERNEL_SIZE := 12288k/ }" "$image_file"
-
-    sed -i "/^define Device\/jdcloud_re-cs-02/,/^endef/ { /KERNEL_SIZE := 6144k/s//KERNEL_SIZE := 12288k/ }" "$image_file"
-
-    sed -i "/^define Device\/jdcloud_re-cs-07/,/^endef/ { /KERNEL_SIZE := 6144k/s//KERNEL_SIZE := 12288k/ }" "$image_file"
-
-    sed -i "/^define Device\/link_nn6000-common/,/^endef/ { /KERNEL_SIZE := 6144k/s//KERNEL_SIZE := 12288k/ }" "$image_file"
-
-    sed -i "/^define Device\/linksys_mr/,/^endef/ { /KERNEL_SIZE := 8192k/s//KERNEL_SIZE := 12288k/ }" "$image_file"
-
-    sed -i "/^define Device\/linksys_mr7350/,/^endef/ s/^endef/\tIMAGE_SIZE := 12288k\nendef/" "$image_file"
-
-    echo "IPQ60xx 内核大小修改完成"
 }
 
-###############################################################################
-# 开启内存回收补丁
-###############################################################################
+IPQ60XX_FILE="target/linux/qualcommax/image/ipq60xx.mk"
 
-enable_skb_recycler() {
+if [ -f "$IPQ60XX_FILE" ]; then
 
-    local config_file="$1"
+    # emmc-common
+    set_kernel_size "$IPQ60XX_FILE" \
+        "KERNEL_SIZE := 6144k" \
+        "KERNEL_SIZE := 12288k"
 
-    if [ ! -f "$config_file" ]; then
-        echo "WARNING: 未找到配置文件: $config_file"
-        return 0
-    fi
+    # nand-common
+    sed -i '/define Device\/nand-common/,/endef/ {
+        /endef/i\
+	KERNEL_SIZE := 8192k
+    }' "$IPQ60XX_FILE"
 
-    # 防止重复配置
-    sed -i '/^CONFIG_KERNEL_SKB_RECYCLER=/d' "$config_file"
-    sed -i '/^CONFIG_KERNEL_SKB_RECYCLER_MULTI_CPU=/d' "$config_file"
+    # JDCloud 设备
+    set_kernel_size "$IPQ60XX_FILE" \
+        "KERNEL_SIZE := 6144k" \
+        "KERNEL_SIZE := 12288k"
 
-    cat >> "$config_file" <<EOF
+    # Linksys MR
+    set_kernel_size "$IPQ60XX_FILE" \
+        "KERNEL_SIZE := 8192k" \
+        "KERNEL_SIZE := 12288k"
+
+    # Linksys MR7350
+    sed -i '/define Device\/linksys_mr7350/,/endef/ {
+        /endef/i\
+	IMAGE_SIZE := 12288k
+    }' "$IPQ60XX_FILE"
+
+fi
+
+
+# ============================================================
+# 21. 启用 SKB Recycler
+# ============================================================
+
+echo "=========================================="
+echo "启用 SKB Recycler"
+echo "=========================================="
+
+if [ -f .config ]; then
+
+    sed -i \
+        '/^CONFIG_KERNEL_SKB_RECYCLER=/d' \
+        .config
+
+    sed -i \
+        '/^# CONFIG_KERNEL_SKB_RECYCLER is not set$/d' \
+        .config
+
+    cat >> .config <<'EOF'
+
 CONFIG_KERNEL_SKB_RECYCLER=y
 CONFIG_KERNEL_SKB_RECYCLER_MULTI_CPU=y
 EOF
 
-    echo "CONFIG_KERNEL_SKB_RECYCLER=y"
-    echo "CONFIG_KERNEL_SKB_RECYCLER_MULTI_CPU=y"
-}
-
-###############################################################################
-# 执行内核修改
-###############################################################################
-
-set_kernel_size
-
-if [ -f .config ]; then
-    enable_skb_recycler ".config"
-else
-    echo "WARNING: .config 不存在，跳过 SKB Recycler 配置"
 fi
 
-###############################################################################
-# 14. DIY2 完成
-###############################################################################
 
-echo
-echo "========================================"
-echo "DIY2 OK"
-echo "========================================"
+# ============================================================
+# 22. OpenAppFilter
+# ============================================================
+
+echo "=========================================="
+echo "添加 OpenAppFilter"
+echo "=========================================="
+
 rm -rf feeds/packages/net/open-app-filter
-git clone https://github.com/destan19/OpenAppFilter package/OpenAppFilter
-##-----Update golang for luci-app-openlist2------
-rm -rf feeds/packages/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/lang/golang
-git clone https://github.com/sbwml/luci-app-openlist2 package/openlist
-git clone https://github.com/EasyTier/luci-app-easytier package/luci-app-easytier
-git clone https://github.com/gdy666/luci-app-lucky package/lucky
-##-----Fix nginx.config for luci-app-quickfile------
-cat > feeds/packages/net/nginx-util/files/nginx.config << 'EOF'
 
+git clone https://github.com/destan19/OpenAppFilter package/OpenAppFilter
+
+
+# ============================================================
+# 23. Golang 源码更新（sbwml）
+#
+# 保留原脚本后续覆盖行为
+# ============================================================
+
+echo "=========================================="
+echo "更新 Golang 源码（sbwml）"
+echo "=========================================="
+
+rm -rf feeds/packages/lang/golang
+
+git clone -b 26.x https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
+
+
+# ============================================================
+# 24. OpenList
+# ============================================================
+
+echo "=========================================="
+echo "添加 OpenList"
+echo "=========================================="
+
+git clone https://github.com/sbwml/luci-app-openlist2 package/openlist
+
+
+# ============================================================
+# 25. EasyTier
+# ============================================================
+
+echo "=========================================="
+echo "添加 EasyTier"
+echo "=========================================="
+
+git clone https://github.com/EasyTier/luci-app-easytier package/luci-app-easytier
+
+
+# ============================================================
+# 26. Lucky
+# ============================================================
+
+echo "=========================================="
+echo "添加 Lucky"
+echo "=========================================="
+
+git clone https://github.com/gdy666/luci-app-lucky package/lucky
+
+
+# ============================================================
+# 27. Nginx 配置
+# ============================================================
+
+echo "=========================================="
+echo "配置 Nginx"
+echo "=========================================="
+
+NGINX_CONFIG="package/network/services/nginx-util/files/nginx.config"
+
+mkdir -p "$(dirname "$NGINX_CONFIG")"
+
+cat > "$NGINX_CONFIG" <<'EOF'
 config main global
-	option uci_enable 'true'
+    option uci_enable 'true'
 
 config server '_lan'
-	option server_name '_lan'
-	list listen '80 default_server'
-	list listen '[::]:80 default_server'
-	list include 'conf.d/*.locations'
-	option access_log 'off; # logd openwrt'
+    option server_name '_lan'
+    list listen '80 default_server'
+    list listen '[::]:80 default_server'
+    list include 'conf.d/*.locations'
+    option access_log 'off; # logd openwrt'
 EOF
-git clone https://github.com/sbwml/luci-app-quickfile package/quickfile
-git clone --depth=1 https://github.com/LazuliKao/luci-theme-fluent /tmp/luci-theme-fluent
-cp -a /tmp/luci-theme-fluent/package/* package/
-git clone https://github.com/eamonxg/luci-theme-shadcn package/luci-theme-shadcn
-rm -rf feeds/luci/themes/luci-theme-argon
-git clone https://github.com/jerrykuku/luci-theme-argon package/luci-theme-argon
-##-----------------Add OpenClash meta core------------------
-curl -sL -m 30 --retry 2 https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz -o /tmp/clash.tar.gz
-tar zxvf /tmp/clash.tar.gz -C /tmp >/dev/null 2>&1
-chmod +x /tmp/clash >/dev/null 2>&1
-mkdir -p feeds/luci/applications/luci-app-openclash/root/etc/openclash/core
-mv /tmp/clash feeds/luci/applications/luci-app-openclash/root/etc/openclash/core/clash_meta >/dev/null 2>&1
-rm -rf /tmp/clash.tar.gz >/dev/null 2>&1
-##-----------------Delete DDNS's examples-----------------
-sed -i '/myddns_ipv4/,$d' feeds/packages/net/ddns-scripts/files/etc/config/ddns
-##-----------------Display fixed frequency info for MT7986A-----------------
-sed -i '/"mediatek"\/\*|"mvebu"\/\*)/i "mediatek/filogic")\n\tcpu_freq="2.0GHz" ;;' package/emortal/autocore/files/generic/cpuinfo
 
+
+# ============================================================
+# 28. QuickFile
+# ============================================================
+
+echo "=========================================="
+echo "添加 QuickFile"
+echo "=========================================="
+
+git clone https://github.com/sbwml/luci-app-quickfile package/quickfile
+
+
+# ============================================================
+# 29. LuCI Fluent 主题
+# ============================================================
+
+echo "=========================================="
+echo "添加 LuCI Fluent 主题"
+echo "=========================================="
+
+git clone https://github.com/LazuliKao/luci-theme-fluent /tmp/luci-theme-fluent
+
+cp -a /tmp/luci-theme-fluent/package/* package/
+
+
+# ============================================================
+# 30. LuCI Shadcn 主题
+# ============================================================
+
+echo "=========================================="
+echo "添加 LuCI Shadcn 主题"
+echo "=========================================="
+
+git clone https://github.com/eamonxg/luci-theme-shadcn package/luci-theme-shadcn
+
+
+# ============================================================
+# 31. LuCI Argon 主题
+# ============================================================
+
+echo "=========================================="
+echo "添加 LuCI Argon 主题"
+echo "=========================================="
+
+rm -rf feeds/luci/themes/luci-theme-argon
+
+git clone https://github.com/jerrykuku/luci-theme-argon package/luci-theme-argon
+
+
+# ============================================================
+# 32. OpenClash Meta 核心
+# ============================================================
+
+echo "=========================================="
+echo "下载 OpenClash Meta 核心"
+echo "=========================================="
+
+curl -L \
+    https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz \
+    -o /tmp/clash.tar.gz
+
+tar -zxf /tmp/clash.tar.gz -C /tmp/
+
+chmod +x /tmp/clash
+
+mkdir -p feeds/luci/applications/luci-app-openclash/root/etc/openclash/core
+
+mv /tmp/clash \
+    feeds/luci/applications/luci-app-openclash/root/etc/openclash/core/clash_meta
+
+rm -f /tmp/clash.tar.gz
+
+
+# ============================================================
+# 33. 删除 DDNS 示例配置
+# ============================================================
+
+echo "=========================================="
+echo "清理 DDNS 示例配置"
+echo "=========================================="
+
+DDNS_CONFIG="feeds/packages/net/ddns-scripts/files/etc/config/ddns"
+
+if [ -f "$DDNS_CONFIG" ]; then
+    sed -i '/myddns_ipv4/,$d' "$DDNS_CONFIG"
+fi
+
+
+# ============================================================
+# 34. MT7986A CPU 频率显示
+# ============================================================
+
+echo "=========================================="
+echo "设置 MT7986A CPU 频率显示"
+echo "=========================================="
+
+CPUINFO_FILE="package/emortal/autocore/files/generic/cpuinfo"
+
+if [ -f "$CPUINFO_FILE" ]; then
+
+    sed -i '/"mediatek"\/\*|"mvebu"\/\*)/i "mediatek/filogic")\n\tcpu_freq="2.0GHz" ;;' \
+        "$CPUINFO_FILE"
+
+fi
+
+
+# ============================================================
+# 35. DIY2 执行完成
+# ============================================================
+
+echo "=========================================="
+echo "DIY2 所有操作执行完成"
+echo "=========================================="
+
+exit 0
