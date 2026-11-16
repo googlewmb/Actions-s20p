@@ -39,7 +39,7 @@ env:
   ##手动设置上传时候的打包名称和tag名称UPLOAD_TAG_NAME
   OPENWRT_NAME: padavanonly-24.10
   UPLOAD_TAG_NAME: supergateway_s20p
-  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
+  REPO_URL: https://github.com/Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly
   REPO_BRANCH: openwrt-24.10-6.6
   FEEDS_CONF: padavanonly-24.10/CLX-S20P/feeds.conf.default
   CONFIG_FILE: padavanonly-24.10/CLX-S20P/.mtwifi-cfg.dae.config
